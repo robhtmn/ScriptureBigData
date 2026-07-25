@@ -1,0 +1,3 @@
+# Runtime dependencies for the Vercel deployment (the web layer).
+# The core `scripturebigdata` engine itself is pure standard library.
+fastapi>=0.110

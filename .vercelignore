@@ -1,0 +1,11 @@
+# Keep the serverless bundle small: only src/, data/sample/ and api/ are needed.
+data/build/
+data/cache/
+data/raw/
+notebooks/
+tests/
+scripts/
+**/__pycache__/
+*.sqlite
+*.sqlite3
+*.db
