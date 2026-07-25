@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scripturebigdata"
+version = "0.1.0"
+description = "Treat the whole of Scripture (Hebrew OT, Greek NT, Septuagint) as big data: search, analyze, visualize, and connect words, phrases and passages in their original languages."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "ScriptureBigData contributors" }]
+keywords = ["bible", "scripture", "hebrew", "greek", "septuagint", "nlp", "concordance", "linguistics"]
+
+# The core engine deliberately depends on the Python standard library only
+# (sqlite3, urllib, xml, json, zipfile). Everything else is an optional extra so
+# the analysis engine stays lightweight and portable.
+dependencies = []
+
+[project.optional-dependencies]
+web = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
+viz = ["matplotlib>=3.7"]
+dev = ["pytest>=7.4", "fastapi>=0.110", "uvicorn[standard]>=0.29", "httpx>=0.27"]
+all = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "matplotlib>=3.7", "pytest>=7.4", "httpx>=0.27"]
+
+[project.scripts]
+sbd = "scripturebigdata.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/robhtmn/scripturebigdata"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+scripturebigdata = ["web/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
