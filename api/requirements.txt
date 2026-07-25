@@ -1,0 +1,4 @@
+# Vercel's @vercel/python builder installs the requirements.txt that sits
+# NEXT TO the entrypoint (api/index.py), so the web layer's dependency must be
+# declared here (the root requirements.txt is not used with the `builds` config).
+fastapi>=0.110
