@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>ScriptureBigData</title>
+<style>
+  :root{
+    --bg:#f6f5f1; --panel:#ffffff; --ink:#20242c; --muted:#6b7280;
+    --line:#e4e2db; --accent:#4f79c7; --accent2:#8a6fbf; --ot:#5aa469;
+    --nt:#c85c6b; --lxx:#e0a458; --chip:#eef1f8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{--bg:#14161b;--panel:#1c1f27;--ink:#e6e7ea;--muted:#9aa1ad;
+      --line:#2a2e38;--chip:#232a3a;}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+  header{background:var(--panel);border-bottom:1px solid var(--line);
+    padding:14px 20px;position:sticky;top:0;z-index:5}
+  h1{margin:0;font-size:20px;letter-spacing:.2px}
+  h1 small{color:var(--muted);font-weight:400;font-size:13px;margin-left:8px}
+  .stats{color:var(--muted);font-size:12.5px;margin-top:3px}
+  .wrap{max-width:1080px;margin:0 auto;padding:18px 20px}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:12px;margin-bottom:14px}
+  select,input,button{font:inherit;color:var(--ink);background:var(--panel);
+    border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  input[type=text]{flex:1;min-width:180px}
+  button{background:var(--accent);color:#fff;border:none;cursor:pointer;
+    padding:8px 16px;font-weight:600}
+  button.ghost{background:var(--chip);color:var(--ink)}
+  button:hover{filter:brightness(1.06)}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+  .tab{padding:6px 12px;border-radius:20px;background:var(--chip);cursor:pointer;
+    font-size:13.5px;border:1px solid transparent}
+  .tab.active{background:var(--accent);color:#fff}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:16px;margin-bottom:14px}
+  .muted{color:var(--muted)}
+  .hint{color:var(--muted);font-size:13px;margin:2px 0 12px}
+  .hit{padding:9px 0;border-bottom:1px solid var(--line)}
+  .hit:last-child{border-bottom:none}
+  .ref{font-weight:600;color:var(--accent);cursor:pointer}
+  .ref:hover{text-decoration:underline}
+  .badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:10px;
+    background:var(--chip);color:var(--muted);margin-left:6px;vertical-align:1px}
+  .b-OT{background:rgba(90,164,105,.16);color:var(--ot)}
+  .b-NT{background:rgba(200,92,107,.16);color:var(--nt)}
+  .b-LXX{background:rgba(224,164,88,.18);color:#b9812f}
+  .orig{font-family:"SBL Hebrew","Times New Roman",Georgia,serif;font-size:19px}
+  .rtl{direction:rtl;unicode-bidi:isolate}
+  .versetext{font-family:Georgia,serif;margin-top:3px}
+  table{border-collapse:collapse;width:100%}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);
+    font-size:14px;vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;
+    letter-spacing:.4px}
+  .il-orig{font-size:20px}
+  .barrow{display:grid;grid-template-columns:190px 1fr 52px;gap:8px;
+    align-items:center;margin:3px 0}
+  .barrow .lab{text-align:right;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bar{height:16px;background:var(--accent);border-radius:3px}
+  .cnt{font-size:12px;color:var(--muted)}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:720px){.cols{grid-template-columns:1fr}}
+  .align-ed{padding:8px 0;border-bottom:1px solid var(--line)}
+  .phrasehl{background:rgba(224,164,88,.28);border-radius:3px;padding:0 2px}
+  code{background:var(--chip);padding:1px 5px;border-radius:5px;font-size:13px}
+  a.linklike{color:var(--accent);cursor:pointer;text-decoration:none}
+  svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+<header>
+  <h1>ScriptureBigData <small>Scripture as big data — Hebrew · Greek · Septuagint</small></h1>
+  <div class="stats" id="stats">loading…</div>
+</header>
+
+<div class="wrap">
+  <div class="tabs" id="tabs"></div>
+
+  <div class="toolbar" id="toolbar"></div>
+
+  <div id="out"></div>
+</div>
+
+<script>
+const API = "/api";
+const el = (h)=>{const t=document.createElement('template');t.innerHTML=h.trim();return t.content.firstChild;};
+const esc = (s)=>String(s==null?"":s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const isHeb = (lang)=>lang==='hebrew'||lang==='aramaic';
+const corpusOf = {WLC:'OT','LXX-Rahlfs':'LXX',SBLGNT:'NT'};
+function edBadge(ed){const c=corpusOf[ed]||'';return `<span class="badge b-${c}">${esc(ed)}</span>`;}
+function origSpan(text,lang){return `<span class="orig ${isHeb(lang)?'rtl':''}">${esc(text)}</span>`;}
+
+const TABS = [
+  {id:'search', label:'Word search'},
+  {id:'phrase', label:'Phrase'},
+  {id:'interlinear', label:'Interlinear'},
+  {id:'xref', label:'Cross-references'},
+  {id:'align', label:'Alignment'},
+  {id:'freq', label:'Frequency'},
+  {id:'distribution', label:'Distribution'},
+  {id:'cooccur', label:'Co-occurrence'},
+  {id:'lexicon', label:'Lexicon'},
+];
+let active = 'search';
+
+function renderTabs(){
+  const t=document.getElementById('tabs'); t.innerHTML='';
+  TABS.forEach(tab=>{
+    const d=el(`<div class="tab ${tab.id===active?'active':''}">${tab.label}</div>`);
+    d.onclick=()=>{active=tab.id;renderTabs();renderToolbar();document.getElementById('out').innerHTML='';};
+    t.appendChild(d);
+  });
+}
+
+const TOOLBARS = {
+  search: `<input type="text" id="q" placeholder="e.g. ἀγάπη · אלהים · love"/>
+    <select id="field"><option value="auto">auto</option><option value="lemma">lemma</option>
+      <option value="surface">surface</option><option value="strongs">Strong's</option>
+      <option value="gloss">gloss (English)</option><option value="pos">part of speech</option>
+      <option value="morph">morphology</option></select>
+    <select id="match"><option value="exact">exact</option><option value="prefix">prefix</option>
+      <option value="contains">contains</option></select>
+    <select id="corpus"><option value="">all corpora</option><option>OT</option><option>NT</option><option>LXX</option></select>
+    <button onclick="doSearch()">Search</button>`,
+  phrase: `<input type="text" id="q" placeholder="original-language phrase, e.g. εν αρχη"/>
+    <select id="field"><option value="original">original</option><option value="gloss">English gloss</option></select>
+    <select id="corpus"><option value="">all corpora</option><option>OT</option><option>NT</option><option>LXX</option></select>
+    <button onclick="doPhrase()">Find</button>`,
+  interlinear: `<input type="text" id="q" placeholder="a single verse, e.g. John 1:1"/>
+    <button onclick="doInterlinear()">Show</button>`,
+  xref: `<input type="text" id="q" placeholder="a verse, e.g. Matt 1:23"/>
+    <button onclick="doXref()">Find quotations & parallels</button>`,
+  align: `<input type="text" id="q" placeholder="an OT verse, e.g. Gen 1:1"/>
+    <button onclick="doAlign()">Align editions</button>`,
+  freq: `<select id="by"><option>lemma</option><option>strongs</option><option>pos</option></select>
+    <select id="corpus"><option value="">all corpora</option><option>OT</option><option>NT</option><option>LXX</option></select>
+    <input type="text" id="top" value="25" style="max-width:70px"/>
+    <button onclick="doFreq()">Rank</button>`,
+  distribution: `<input type="text" id="q" placeholder="a word/lemma/Strong's, e.g. G26"/>
+    <button onclick="doDist()">Chart by book</button>`,
+  cooccur: `<input type="text" id="q" placeholder="a word/lemma/Strong's, e.g. ἀγάπη"/>
+    <button onclick="doCooccur()">Show network</button>`,
+  lexicon: `<input type="text" id="q" placeholder="a Strong's number, e.g. G26 or H430"/>
+    <button onclick="doLexicon()">Look up</button>`,
+};
+const HINTS = {
+  search:"Search words by dictionary form (lemma), exact surface, Strong's number, English gloss, part of speech, or morphology. Accent- and vowel-insensitive.",
+  phrase:"Find whole verses containing a phrase (order matters). Accent/points-insensitive.",
+  interlinear:"Word-by-word breakdown of a verse: surface, lemma, Strong's, gloss and full parsing.",
+  xref:"Find other passages that share a run of words — this is how New Testament quotations of the Septuagint surface (try Matt 1:23).",
+  align:"See a verse in every edition side by side — Hebrew next to the Greek Septuagint.",
+  freq:"Most frequent words across a corpus.",
+  distribution:"How a word is distributed across the books of Scripture.",
+  cooccur:"Which words most often share a verse with your word.",
+  lexicon:"Strong's lexicon entry and where the word occurs across the corpora.",
+};
+
+function renderToolbar(){
+  document.getElementById('toolbar').innerHTML = TOOLBARS[active];
+  const out=document.getElementById('out');
+  out.innerHTML = `<div class="hint">${HINTS[active]}</div>`;
+  const q=document.getElementById('q');
+  if(q){q.addEventListener('keydown',e=>{if(e.key==='Enter')document.querySelector('#toolbar button').click();});q.focus();}
+}
+
+async function get(path){const r=await fetch(API+path);return r.json();}
+const val=(id)=>{const e=document.getElementById(id);return e?e.value.trim():'';};
+function setOut(html){document.getElementById('out').innerHTML=html;}
+function panel(inner){return `<div class="panel">${inner}</div>`;}
+
+// ---- word search ----
+async function doSearch(){
+  const q=val('q'); if(!q)return;
+  const params=new URLSearchParams({q,field:val('field'),match:val('match'),limit:200});
+  if(val('corpus'))params.set('corpus',val('corpus'));
+  setOut(panel('<span class="muted">Searching…</span>'));
+  const d=await get('/search?'+params);
+  if(!d.results.length){setOut(panel('No matches.'));return;}
+  let h=`<div class="panel"><b>${d.count}</b> match(es) for <code>${esc(q)}</code>`;
+  d.results.forEach(r=>{
+    h+=`<div class="hit"><span class="ref" onclick="jump('${esc(r.book)} ${r.chapter}:${r.verse}')">${esc(r.reference)}</span> ${edBadge(r.edition)}
+      &nbsp; ${origSpan(r.surface,r.language)}
+      <span class="muted"> ${esc(r.strongs)} · ${esc(r.lemma)} · ${esc(r.gloss)}</span>
+      <div class="muted" style="font-size:12px">${esc(r.morph_desc)}</div>
+      <div class="versetext ${isHeb(r.language)?'rtl':''}">${esc(r.verse_text)}</div></div>`;
+  });
+  setOut(h+'</div>');
+}
+
+// ---- phrase ----
+async function doPhrase(){
+  const q=val('q'); if(!q)return;
+  const params=new URLSearchParams({q,field:val('field'),limit:100});
+  if(val('corpus'))params.set('corpus',val('corpus'));
+  setOut(panel('<span class="muted">Searching…</span>'));
+  const d=await get('/phrase?'+params);
+  if(!d.results.length){setOut(panel('No verses found.'));return;}
+  let h=`<div class="panel"><b>${d.count}</b> verse(s) containing <code>${esc(q)}</code>`;
+  d.results.forEach(r=>{h+=`<div class="hit"><span class="ref" onclick="jump('${esc(r.book)} ${r.chapter}:${r.verse}')">${esc(r.reference)}</span> ${edBadge(r.edition)}
+    <div class="versetext ${isHeb(r.language)?'rtl':''}">${esc(r.text)}</div></div>`;});
+  setOut(h+'</div>');
+}
+
+// ---- interlinear ----
+function jump(ref){active='interlinear';renderTabs();renderToolbar();document.getElementById('q').value=ref;doInterlinear();}
+async function doInterlinear(){
+  const q=val('q'); if(!q)return;
+  setOut(panel('<span class="muted">Loading…</span>'));
+  const d=await get('/interlinear?ref='+encodeURIComponent(q));
+  if(d.error){setOut(panel(esc(d.error)));return;}
+  if(!d.tokens.length){setOut(panel('No data for that verse/edition.'));return;}
+  const lang=d.tokens[0].language;
+  let h=`<div class="panel"><h3 style="margin:0 0 10px">${esc(d.reference)} ${edBadge(d.tokens[0].edition)}</h3>
+    <table><tr><th>#</th><th>word</th><th>lemma</th><th>Strong's</th><th>gloss</th><th>parsing</th></tr>`;
+  d.tokens.forEach(t=>{h+=`<tr><td class="muted">${t.position}</td>
+    <td class="il-orig ${isHeb(lang)?'rtl':''}">${esc(t.surface)}</td>
+    <td class="orig ${isHeb(lang)?'rtl':''}" style="font-size:15px">${esc(t.lemma)}</td>
+    <td><a class="linklike" onclick="lex('${esc(t.strongs)}')">${esc(t.strongs)}</a></td>
+    <td>${esc(t.gloss)}</td><td class="muted" style="font-size:12.5px">${esc(t.morph_desc)}</td></tr>`;});
+  setOut(h+'</table></div>');
+}
+
+// ---- cross references ----
+async function doXref(){
+  const q=val('q'); if(!q)return;
+  setOut(panel('<span class="muted">Scanning the corpus for shared wording…</span>'));
+  const d=await get('/xref?ref='+encodeURIComponent(q)+'&min_words=3');
+  if(d.error){setOut(panel(esc(d.error)));return;}
+  if(!d.results.length){setOut(panel('No shared wording found in this database.'));return;}
+  let h=`<div class="panel"><h3 style="margin:0 0 4px">Passages sharing wording with ${esc(d.reference)} ${edBadge(d.edition)}</h3>
+    <div class="hint">Longer shared phrases (top) are stronger links — quotations or parallels.</div>`;
+  d.results.forEach(r=>{h+=`<div class="hit"><span class="ref" onclick="jump('${esc(r.book)} ${r.chapter}:${r.verse}')">${esc(r.reference)}</span> ${edBadge(r.edition)}
+    <span class="badge">${r.words} words</span>
+    <div class="versetext ${isHeb(r.language)?'rtl':''}">${esc(r.text)}</div>
+    <div class="muted" style="font-size:12.5px">shared: <span class="phrasehl">${esc(r.phrase)}</span></div></div>`;});
+  setOut(h+'</div>');
+}
+
+// ---- alignment ----
+async function doAlign(){
+  const q=val('q'); if(!q)return;
+  setOut(panel('<span class="muted">Aligning…</span>'));
+  const d=await get('/align?ref='+encodeURIComponent(q));
+  if(d.error){setOut(panel(esc(d.error)));return;}
+  const eds=Object.keys(d.editions);
+  if(!eds.length){setOut(panel('No data for that verse.'));return;}
+  let h=`<div class="panel"><h3 style="margin:0 0 8px">${esc(d.reference)} — parallel editions</h3>`;
+  eds.forEach(ed=>{const toks=d.editions[ed];const lang=toks[0].language;
+    h+=`<div class="align-ed">${edBadge(ed)} <span class="muted">${lang}</span>
+      <div class="versetext ${isHeb(lang)?'rtl':''}" style="font-size:18px">${toks.map(t=>`<span title="${esc(t.lemma)} ${esc(t.strongs)} · ${esc(t.gloss)}">${esc(t.surface)}</span>`).join(' ')}</div></div>`;});
+  setOut(h+'</div>');
+}
+
+// ---- frequency ----
+async function doFreq(){
+  setOut(panel('<span class="muted">Counting…</span>'));
+  const params=new URLSearchParams({by:val('by'),top:val('top')||25});
+  if(val('corpus'))params.set('corpus',val('corpus'));
+  const d=await get('/frequency?'+params);
+  drawBars(d.results, r=>r.lemma||r.key, r=>r.n, r=>`${r.strongs||''} ${r.gloss||''}`,
+    `Top ${d.results.length} by ${d.by}`);
+}
+function drawBars(rows, labFn, valFn, subFn, title){
+  if(!rows.length){setOut(panel('No data.'));return;}
+  const max=Math.max(...rows.map(valFn))||1;
+  let h=`<div class="panel"><h3 style="margin:0 0 12px">${esc(title)}</h3>`;
+  rows.forEach(r=>{const w=Math.max(2,Math.round(100*valFn(r)/max));
+    h+=`<div class="barrow"><div class="lab" title="${esc(subFn(r))}">${esc(labFn(r))}</div>
+      <div><div class="bar" style="width:${w}%"></div></div>
+      <div class="cnt">${valFn(r)}</div></div>`;});
+  setOut(h+'</div>');
+}
+
+// ---- distribution ----
+async function doDist(){
+  const q=val('q'); if(!q)return;
+  setOut(panel('<span class="muted">Loading…</span>'));
+  const d=await get('/distribution?word='+encodeURIComponent(q));
+  if(!d.distribution.length){setOut(panel('No occurrences.'));return;}
+  const max=Math.max(...d.distribution.map(x=>x.n))||1, W=760,H=200,base=H-30,pt=10;
+  const cw=Math.max(10,Math.min(50,(W-20)/d.distribution.length));
+  let bars='';
+  d.distribution.forEach((x,i)=>{const bh=Math.round((base-pt)*x.n/max),xx=12+i*cw;
+    bars+=`<rect x="${xx}" y="${base-bh}" width="${cw-4}" height="${bh}" rx="2" fill="var(--accent)"><title>${esc(x.book)}: ${x.n}</title></rect>
+      <text x="${xx+(cw-4)/2}" y="${base+12}" font-size="9" text-anchor="middle" fill="var(--muted)">${esc(x.book).slice(0,4)}</text>`;});
+  setOut(panel(`<h3 style="margin:0 0 10px">Distribution of <code>${esc(q)}</code> by book</h3>
+    <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${bars}</svg>`));
+}
+
+// ---- co-occurrence network ----
+async function doCooccur(){
+  const q=val('q'); if(!q)return;
+  setOut(panel('<span class="muted">Computing…</span>'));
+  const d=await get('/cooccurrence?word='+encodeURIComponent(q)+'&top=18&min_count=1');
+  const g=d.graph;
+  if(g.nodes.length<=1){setOut(panel('Not enough co-occurring words.'));return;}
+  const others=g.nodes.filter(n=>!n.central);
+  const W=680,H=460,cx=W/2,cy=H/2,R=Math.min(W,H)/2-70;
+  const maxw=Math.max(...others.map(n=>n.weight))||1;
+  let svg=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`;
+  others.forEach((n,i)=>{const a=2*Math.PI*i/others.length-Math.PI/2;
+    n._x=cx+R*Math.cos(a);n._y=cy+R*Math.sin(a);
+    svg+=`<line x1="${cx}" y1="${cy}" x2="${n._x}" y2="${n._y}" stroke="var(--line)" stroke-width="${1+3*n.weight/maxw}"/>`;});
+  others.forEach(n=>{const r=6+10*n.weight/maxw;
+    svg+=`<circle cx="${n._x}" cy="${n._y}" r="${r}" fill="var(--accent2)" opacity="0.85"><title>${esc(n.label)} (${n.weight})</title></circle>
+      <text x="${n._x}" y="${n._y-r-3}" font-size="12" text-anchor="middle" fill="var(--ink)">${esc(n.label)}</text>`;});
+  svg+=`<circle cx="${cx}" cy="${cy}" r="26" fill="var(--accent)"/><text x="${cx}" y="${cy+4}" font-size="13" text-anchor="middle" fill="#fff">${esc(q)}</text></svg>`;
+  setOut(panel(`<h3 style="margin:0 0 6px">Words sharing verses with <code>${esc(q)}</code></h3>
+    <div class="hint">Ring size = how often it co-occurs.</div>${svg}`));
+}
+
+// ---- lexicon ----
+function lex(s){if(!s)return;active='lexicon';renderTabs();renderToolbar();document.getElementById('q').value=s;doLexicon();}
+async function doLexicon(){
+  const q=val('q'); if(!q)return;
+  setOut(panel('<span class="muted">Looking up…</span>'));
+  const d=await get('/lexicon?strongs='+encodeURIComponent(q));
+  if(d.error){setOut(panel('Not found.'));return;}
+  let usage=(d.usage||[]).map(u=>`${edBadge(u.edition)} ${u.n}`).join(' &nbsp; ')||'—';
+  setOut(panel(`<h3 style="margin:0 0 6px">${esc(d.strongs)} &nbsp; <span class="orig">${esc(d.lemma)}</span>
+    <span class="muted">${esc(d.translit)}</span></h3>
+    <p><b>${esc(d.gloss)}</b></p><p class="muted">${esc(d.definition)}</p>
+    <p>Occurrences: ${usage}</p>
+    <p><a class="linklike" onclick="conc('${esc(d.strongs)}')">Show every occurrence →</a></p>`));
+}
+async function conc(s){
+  setOut(panel('<span class="muted">Loading concordance…</span>'));
+  const d=await get('/concordance?word='+encodeURIComponent(s));
+  let h=`<div class="panel"><h3 style="margin:0 0 8px">${d.results.length} occurrence(s) of ${esc(s)}</h3>`;
+  d.results.forEach(r=>{h+=`<div class="hit"><span class="ref" onclick="jump('${esc(r.book)} ${r.chapter}:${r.verse}')">${esc(r.reference)}</span> ${edBadge(r.edition)}
+    <div class="versetext">${esc(r.verse_text)}</div></div>`;});
+  setOut(h+'</div>');
+}
+
+// ---- init ----
+async function init(){
+  renderTabs(); renderToolbar();
+  const s=await get('/stats');
+  const eds=s.editions.map(e=>`${e.name} (${e.tokens.toLocaleString()})`).join(' · ');
+  document.getElementById('stats').innerHTML =
+    `${s.tokens.toLocaleString()} words · ${s.verses.toLocaleString()} verses · ${s.lexicon.toLocaleString()} lexicon entries &nbsp;|&nbsp; ${eds}`;
+}
+init();
+</script>
+</body>
+</html>
