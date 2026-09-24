@@ -47,3 +47,8 @@ def test_xref(client):
 def test_lexicon(client):
     r = client.get("/api/lexicon", params={"strongs": "G26"})
     assert r.status_code == 200 and r.json()["lemma"] == "ἀγάπη"
+
+
+def test_interlinear_viewer(client):
+    r = client.get("/interlinear")
+    assert r.status_code == 200 and "NBSB Interlinear" in r.text
