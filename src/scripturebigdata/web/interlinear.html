@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NBSB Interlinear Viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,700;1,400&family=Noto+Serif+Hebrew:wght@400;700&display=swap" rel="stylesheet">
+<!--
+  NBSB Interlinear Viewer
+  =======================
+  A self-contained reader for the NBSB interlinear workbooks
+  (Nbsb_Old_Testament.xlsx / Nbsb_New_Testament.xlsx).
+
+  * Load one or more .xlsx workbooks (button or drag & drop). They are parsed
+    in a background worker, straight from the file, and saved in this
+    browser's IndexedDB - so after the first load every lookup is instant,
+    even after closing the page.
+  * Loading a newer workbook replaces every book it contains.
+  * Works when opened straight from disk (file://) or served by `sbd serve`
+    at /interlinear. No server-side processing, nothing is uploaded.
+-->
+<style>
+:root {
+  --bg: #fbfaf7;
+  --surface: #ffffff;
+  --surface-2: #f3f1ec;
+  --border: #e2ded5;
+  --text: #22201c;
+  --muted: #6d675d;
+  --accent: #7a4b16;
+  --accent-soft: #f6ead9;
+  --target-bg: #fff7e6;
+  --target-border: #d99a3a;
+  --danger: #a3302a;
+  --orig: #1f3a5f;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.05);
+  --scale: 1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161513;
+    --surface: #1e1d1a;
+    --surface-2: #26241f;
+    --border: #3a372f;
+    --text: #ece8df;
+    --muted: #a39d90;
+    --accent: #e0a55a;
+    --accent-soft: #3a2c1a;
+    --target-bg: #2c2415;
+    --target-border: #c98a2e;
+    --danger: #ef8a83;
+    --orig: #a9c6ee;
+    --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161513; --surface: #1e1d1a; --surface-2: #26241f; --border: #3a372f;
+  --text: #ece8df; --muted: #a39d90; --accent: #e0a55a; --accent-soft: #3a2c1a;
+  --target-bg: #2c2415; --target-border: #c98a2e; --danger: #ef8a83; --orig: #a9c6ee;
+  --shadow: none;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+button, input, select { font: inherit; color: inherit; }
+button {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 12px; cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 600; }
+button:disabled { opacity: .45; cursor: default; }
+input[type=search], select {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px;
+}
+input[type=search]:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+header.bar {
+  position: sticky; top: 0; z-index: 5;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--border);
+}
+.bar-inner { max-width: 1100px; margin: 0 auto; padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.brand { font-weight: 700; letter-spacing: .01em; margin-right: 4px; white-space: nowrap; }
+.brand span { color: var(--accent); }
+form.search { display: flex; gap: 6px; flex: 1 1 260px; min-width: 0; }
+form.search input { flex: 1; min-width: 0; }
+.nav { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.nav select { max-width: 11em; }
+.opts { max-width: 1100px; margin: 0 auto; padding: 0 16px 10px; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; color: var(--muted); font-size: 13px; }
+.opts label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+.opts .sep { flex: 1; }
+.size-btn { padding: 2px 9px; }
+
+main { max-width: 1100px; margin: 0 auto; padding: 18px 16px 60px; }
+#msg { margin: 0 0 12px; color: var(--danger); min-height: 0; }
+#msg:empty { display: none; }
+
+.verse {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 12px 16px 14px; margin: 0 0 12px; box-shadow: var(--shadow);
+}
+.verse.target { background: var(--target-bg); border-color: var(--target-border); border-left-width: 5px; }
+.hdg { font-weight: 700; font-size: calc(16px * var(--scale)); margin: 0 0 2px; }
+.hdg.sub { font-weight: 600; font-style: italic; font-size: calc(14.5px * var(--scale)); }
+.xref { color: var(--muted); font-size: 12.5px; margin: 0 0 6px; }
+.vref {
+  display: inline-block; font-weight: 600; font-size: 13px; color: var(--accent);
+  text-decoration: none; margin-bottom: 6px;
+}
+.target .vref { font-weight: 800; }
+.vref:hover { text-decoration: underline; }
+.il { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-start; }
+.il.rtl { direction: rtl; }
+.w { display: inline-flex; flex-direction: column; align-items: center; text-align: center; min-width: 1.2em; direction: ltr; }
+.w .o {
+  font-family: "Noto Serif", "SBL Greek", "Gentium Plus", "Times New Roman", serif;
+  font-size: calc(21px * var(--scale)); line-height: 1.5; color: var(--orig);
+  min-height: 1.5em; white-space: nowrap;
+}
+.w .o.he { font-family: "Noto Serif Hebrew", "SBL Hebrew", "Ezra SIL", "Times New Roman", serif; font-size: calc(24px * var(--scale)); direction: rtl; }
+.w .e {
+  font-family: "Noto Serif", Georgia, serif;
+  font-size: calc(16px * var(--scale)); line-height: 1.4; min-height: 1.4em;
+}
+.w .o:empty::before, .w .e:empty::before { content: "\00a0"; }
+.w.gap-o .o, .w.gap-e .e { border-bottom: 1px dashed var(--border); min-width: 2.2em; }
+.target .w .o, .target .w .e { font-weight: 700; }
+.w .d { display: none; font-size: 11.5px; color: var(--muted); line-height: 1.3; }
+body.details .w .d { display: block; }
+.w sup { color: var(--accent); font-weight: 700; font-size: .7em; margin-left: 1px; }
+.fn { margin: 10px 0 0; padding: 8px 0 0 20px; border-top: 1px dashed var(--border); color: var(--muted); font-size: 13px; list-style: lower-alpha; }
+.fn li::marker { color: var(--accent); font-weight: 700; }
+.empty-verse { color: var(--muted); font-style: italic; }
+
+.welcome {
+  background: var(--surface); border: 2px dashed var(--border); border-radius: 16px;
+  padding: 32px 24px; text-align: center; max-width: 640px; margin: 40px auto;
+}
+.welcome h1 { font-size: 22px; margin: 0 0 8px; }
+.welcome p { color: var(--muted); margin: 8px 0; }
+.welcome button { margin-top: 12px; }
+
+footer.status { max-width: 1100px; margin: 0 auto; padding: 0 16px 40px; color: var(--muted); font-size: 12.5px; }
+footer.status .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+footer.status ul { margin: 6px 0 0; padding-left: 18px; }
+footer.status button { font-size: 12.5px; padding: 3px 10px; }
+
+#drop {
+  position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--bg) 80%, transparent); border: 4px dashed var(--accent);
+  font-size: 22px; font-weight: 700; color: var(--accent);
+}
+#drop.on { display: flex; }
+#loading {
+  position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--bg) 75%, transparent);
+}
+#loading.on { display: flex; }
+.load-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; width: min(440px, calc(100vw - 32px)); box-shadow: var(--shadow); }
+.load-card .file { font-weight: 700; word-break: break-all; }
+.load-card .phase { color: var(--muted); font-size: 13px; margin: 6px 0 10px; }
+.progress { height: 8px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
+.progress div { height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+kbd { font: inherit; font-size: 11.5px; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; background: var(--surface-2); }
+
+@media (max-width: 640px) {
+  header.bar { position: static; }
+  .opts .sep { display: none; }
+  .verse { padding: 10px 12px; }
+  .il { gap: 8px 10px; }
+}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="bar-inner">
+    <div class="brand">NBSB <span>Interlinear</span></div>
+    <form class="search" id="searchForm" autocomplete="off">
+      <input type="search" id="q" list="bookList" placeholder="Find a verse, e.g. Gen 1:1, John 3:16, 1 Cor 13:4" aria-label="Verse reference">
+      <datalist id="bookList"></datalist>
+      <button class="primary" type="submit">Go</button>
+    </form>
+    <div class="nav">
+      <button id="prev" title="Previous verse (←)" aria-label="Previous verse">◀</button>
+      <select id="selBook" aria-label="Book"></select>
+      <select id="selCh" aria-label="Chapter"></select>
+      <select id="selV" aria-label="Verse"></select>
+      <button id="next" title="Next verse (→)" aria-label="Next verse">▶</button>
+    </div>
+  </div>
+  <div class="opts">
+    <label title="Word order within each verse">Word order
+      <select id="optOrder">
+        <option value="en">English (BSB sort)</option>
+        <option value="orig">Original language</option>
+      </select>
+    </label>
+    <label title="Use the column with the edition markers {TR} ⧼RP⧽ (WH) 〈NE〉 [NA] ‹SBL›"><input type="checkbox" id="optMarkers"> Edition markers</label>
+    <label title="Show transliteration, parsing and Strong's number under each word"><input type="checkbox" id="optDetails"> Word details</label>
+    <span class="sep"></span>
+    <span>Text size</span>
+    <button class="size-btn" id="smaller" aria-label="Smaller text">A−</button>
+    <button class="size-btn" id="larger" aria-label="Larger text">A+</button>
+  </div>
+</header>
+
+<main>
+  <p id="msg" role="status"></p>
+  <div id="view"></div>
+</main>
+
+<footer class="status" id="status"></footer>
+
+<input type="file" id="file" accept=".xlsx" multiple hidden>
+<div id="drop">Drop workbook(s) to load / replace</div>
+<div id="loading" role="dialog" aria-live="polite">
+  <div class="load-card">
+    <div class="file" id="ldFile"></div>
+    <div class="phase" id="ldPhase">Starting…</div>
+    <div class="progress"><div id="ldBar"></div></div>
+  </div>
+</div>
+
+<!-- ===================================================================
+     Shared code: runs on the page AND inside the parsing worker.
+     =================================================================== -->
+<script id="common-src">
+"use strict";
+const DB_NAME = "nbsb-interlinear";
+const DB_VERSION = 1;
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains("books")) db.createObjectStore("books", { keyPath: "name" });
+      if (!db.objectStoreNames.contains("meta")) db.createObjectStore("meta");
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+function idbReq(req) {
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// Canonical Protestant order; used to order books and to resolve abbreviations.
+const CANON = [
+  "Genesis","Exodus","Leviticus","Numbers","Deuteronomy","Joshua","Judges","Ruth",
+  "1 Samuel","2 Samuel","1 Kings","2 Kings","1 Chronicles","2 Chronicles","Ezra",
+  "Nehemiah","Esther","Job","Psalm","Proverbs","Ecclesiastes","Song of Solomon",
+  "Isaiah","Jeremiah","Lamentations","Ezekiel","Daniel","Hosea","Joel","Amos",
+  "Obadiah","Jonah","Micah","Nahum","Habakkuk","Zephaniah","Haggai","Zechariah",
+  "Malachi","Matthew","Mark","Luke","John","Acts","Romans","1 Corinthians",
+  "2 Corinthians","Galatians","Ephesians","Philippians","Colossians",
+  "1 Thessalonians","2 Thessalonians","1 Timothy","2 Timothy","Titus","Philemon",
+  "Hebrews","James","1 Peter","2 Peter","1 John","2 John","3 John","Jude","Revelation",
+];
+function normBook(s) {
+  return String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+function canonIndex(name) {
+  let n = normBook(name);
+  if (n === "psalms") n = "psalm";
+  if (n === "songofsongs" || n === "canticles") n = "songofsolomon";
+  const i = CANON.findIndex(b => normBook(b) === n);
+  return i < 0 ? 1000 : i;
+}
+</script>
+
+<!-- ===================================================================
+     Worker: reads an .xlsx straight from its zip bytes, streaming the
+     (very large) sheet XML so memory stays low, then saves books to IndexedDB.
+     =================================================================== -->
+<script id="worker-src" type="text/plain">
+"use strict";
+
+// ---------- minimal zip reader ----------
+function zipEntries(buf) {
+  const dv = new DataView(buf);
+  let eocd = -1;
+  for (let i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 65557); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("This doesn't look like an .xlsx file (no zip directory found).");
+  const count = dv.getUint16(eocd + 10, true);
+  let off = dv.getUint32(eocd + 16, true);
+  const dec = new TextDecoder();
+  const out = {};
+  for (let k = 0; k < count; k++) {
+    if (dv.getUint32(off, true) !== 0x02014b50) throw new Error("Corrupt zip directory.");
+    const method = dv.getUint16(off + 10, true);
+    const csize = dv.getUint32(off + 20, true);
+    const usize = dv.getUint32(off + 24, true);
+    const nl = dv.getUint16(off + 28, true), xl = dv.getUint16(off + 30, true), cl = dv.getUint16(off + 32, true);
+    const lho = dv.getUint32(off + 42, true);
+    const name = dec.decode(new Uint8Array(buf, off + 46, nl));
+    out[name.replace(/^\/+/, "").toLowerCase()] = { name, method, csize, usize, lho };
+    off += 46 + nl + xl + cl;
+  }
+  return out;
+}
+function entryBytes(buf, e) {
+  const dv = new DataView(buf);
+  const nl = dv.getUint16(e.lho + 26, true), xl = dv.getUint16(e.lho + 28, true);
+  const data = new Uint8Array(buf, e.lho + 30 + nl + xl, e.csize);
+  let s = new Blob([data]).stream();
+  if (e.method === 8) s = s.pipeThrough(new DecompressionStream("deflate-raw"));
+  else if (e.method !== 0) throw new Error("Unsupported zip compression method " + e.method);
+  return s;
+}
+function entryText(buf, e) { return new Response(entryBytes(buf, e)).text(); }
+
+// ---------- XML helpers ----------
+const ENT = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+function xmlDecode(s) {
+  if (s.indexOf("&") >= 0) {
+    s = s.replace(/&(#[xX][0-9a-fA-F]+|#\d+|\w+);/g, (m, g) =>
+      g[0] === "#" ? String.fromCodePoint(g[1] === "x" || g[1] === "X" ? parseInt(g.slice(2), 16) : parseInt(g.slice(1), 10))
+                   : (ENT[g] ?? m));
+  }
+  if (s.indexOf("_x") >= 0) s = s.replace(/_x([0-9A-Fa-f]{4})_/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
+  return s;
+}
+function runText(inner) {
+  inner = inner.replace(/<rPh\b[\s\S]*?<\/rPh>/g, "");
+  let t = "";
+  const re = /<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g;
+  let m;
+  while ((m = re.exec(inner))) t += m[1];
+  return xmlDecode(t);
+}
+function parseSharedStrings(xml) {
+  const out = [];
+  const re = /<si(?:\s[^>]*)?>([\s\S]*?)<\/si>|<si\s*\/>/g;
+  let m;
+  while ((m = re.exec(xml))) out.push(m[1] ? runText(m[1]) : "");
+  return out;
+}
+function colIndex(ref) {
+  let n = 0;
+  for (let i = 0; i < ref.length; i++) {
+    const c = ref.charCodeAt(i);
+    if (c < 65 || c > 90) break;
+    n = n * 26 + (c - 64);
+  }
+  return n - 1;
+}
+const CELL_RE = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+function parseCells(inner, sst) {
+  const cells = [];
+  let next = 0, m;
+  CELL_RE.lastIndex = 0;
+  while ((m = CELL_RE.exec(inner))) {
+    const attrs = m[1], body = m[2];
+    const rm = /\br="([A-Z]+)\d*"/.exec(attrs);
+    const ci = rm ? colIndex(rm[1]) : next;
+    next = ci + 1;
+    if (!body) continue;
+    const tm = /\bt="(\w+)"/.exec(attrs);
+    const t = tm ? tm[1] : "n";
+    if (t === "inlineStr") { cells[ci] = runText(body); continue; }
+    const vm = /<v>([\s\S]*?)<\/v>/.exec(body);
+    if (!vm) continue;
+    const raw = vm[1];
+    if (t === "s") cells[ci] = sst[+raw];
+    else if (t === "str" || t === "e") cells[ci] = xmlDecode(raw);
+    else if (t === "b") cells[ci] = raw === "1";
+    else { const n = Number(raw); cells[ci] = Number.isNaN(n) ? xmlDecode(raw) : n; }
+  }
+  return cells;
+}
+
+// Streams rows of a worksheet: onRow(rowNumber, cells). Returns when done.
+async function streamRows(buf, e, sst, onRow, onProgress) {
+  const reader = entryBytes(buf, e).pipeThrough(new TextDecoderStream()).getReader();
+  const ROW_RE = /<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g;
+  let pending = "", seen = 0, rowNo = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (value) { pending += value; seen += value.length; }
+    let cut = done ? pending.length : pending.lastIndexOf("</row>");
+    if (cut < 0) { if (done) break; continue; }
+    if (!done) cut += 6;
+    const chunk = pending.slice(0, cut);
+    pending = pending.slice(cut);
+    ROW_RE.lastIndex = 0;
+    let m;
+    while ((m = ROW_RE.exec(chunk))) {
+      const rm = /\br="(\d+)"/.exec(m[1]);
+      rowNo = rm ? +rm[1] : rowNo + 1;
+      if (m[2]) onRow(rowNo, parseCells(m[2], sst));
+    }
+    onProgress(Math.min(1, seen / Math.max(1, e.usize)));
+    if (done) break;
+  }
+}
+
+function firstSheet(buf, entries) {
+  const wb = entries["xl/workbook.xml"];
+  const rels = entries["xl/_rels/workbook.xml.rels"];
+  return Promise.all([wb ? entryText(buf, wb) : "", rels ? entryText(buf, rels) : ""]).then(([wbXml, relXml]) => {
+    const sm = /<sheet\b[^>]*\br:id="([^"]+)"/.exec(wbXml) || /<sheet\b[^>]*\bid="([^"]+)"/.exec(wbXml);
+    if (sm) {
+      const re = /<Relationship\b([^>]*)\/?>/g;
+      let m;
+      while ((m = re.exec(relXml))) {
+        const id = /\bId="([^"]+)"/.exec(m[1]), tg = /\bTarget="([^"]+)"/.exec(m[1]);
+        if (id && tg && id[1] === sm[1]) {
+          let p = tg[1].replace(/^\/+/, "");
+          if (!p.toLowerCase().startsWith("xl/")) p = "xl/" + p;
+          const hit = entries[p.toLowerCase()];
+          if (hit) return hit;
+        }
+      }
+    }
+    const names = Object.keys(entries).filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort();
+    if (!names.length) throw new Error("No worksheet found in this workbook.");
+    return entries[names[0]];
+  });
+}
+
+// ---------- workbook format ----------
+function str(v) { return v == null ? "" : String(v); }
+function stripTags(s) { return str(s).replace(/<br\s*\/?>/gi, " ").replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim(); }
+// Footnotes keep <i>/<b> only; everything else is escaped on display.
+function cleanNote(s) { return str(s).replace(/<(?!\/?(i|b|em)>)[^>]*>/gi, "").replace(/\s+/g, " ").trim(); }
+
+function mapColumns(header) {
+  const H = Array.from(header, h => str(h).trim().toLowerCase());
+  const all = key => H.reduce((a, h, i) => (h === key ? a.concat(i) : a), []);
+  const find = pred => H.findIndex(pred);
+  const verseCols = all("verse");
+  const baseCols = H.reduce((a, h, i) => (/^(wlc|nestle)|nestle base|wlc \//.test(h) ? a.concat(i) : a), []);
+  const parsing = all("parsing");
+  const C = {
+    origSort: find(h => /sort$/.test(h) && !/bsb/.test(h)),
+    bsbSort: find(h => h === "bsb sort"),
+    id: verseCols.length > 1 ? verseCols[0] : -1,
+    ref: verseCols.length ? verseCols[verseCols.length - 1] : -1,
+    lang: find(h => h === "language"),
+    orig: baseCols.find(i => !H[i].includes("{")) ?? baseCols[0] ?? -1,
+    marked: baseCols.find(i => H[i].includes("{")) ?? -1,
+    translit: find(h => h === "translit"),
+    parse: parsing.length ? parsing[0] : -1,
+    parseLong: parsing.length > 1 ? parsing[1] : -1,
+    strHeb: find(h => h === "str heb"),
+    strGrk: find(h => h === "str grk"),
+    hdg: find(h => h === "hdg"),
+    xref: find(h => h === "crossref"),
+    eng: find(h => h.includes("nbsb")),
+    open: find(h => h === "“" || h === '"'),
+    pnc: find(h => h === "pnc"),
+    close: find(h => h === "”"),
+    notes: find(h => h === "footnotes" || h === "footnote"),
+    endText: find(h => h === "end text"),
+  };
+  const missing = [];
+  if (C.ref < 0) missing.push("Verse (reference)");
+  if (C.orig < 0) missing.push("WLC / Nestle Base (original language)");
+  if (C.eng < 0) missing.push("NBSB version (English)");
+  if (missing.length) {
+    throw new Error("Couldn't find the column(s): " + missing.join(", ") +
+      ". Found headers: " + Array.from(header, str).filter(Boolean).join(" | "));
+  }
+  return C;
+}
+
+const REF_RE = /^(.*\S)\s+(\d+):(\d+)\s*$/;
+
+async function parseWorkbook(file, progress) {
+  progress("Reading file…", 0);
+  const buf = await file.arrayBuffer();
+  const entries = zipEntries(buf);
+  const sheet = await firstSheet(buf, entries);
+  progress("Reading shared strings…", 0.02);
+  const sstEntry = entries["xl/sharedstrings.xml"];
+  const sst = sstEntry ? parseSharedStrings(await entryText(buf, sstEntry)) : [];
+
+  let C = null;
+  const verses = new Map();
+  let seq = 0, lastKey = null, rows = 0, words = 0;
+  const get = (cells, i) => (i >= 0 ? cells[i] : undefined);
+
+  await streamRows(buf, sheet, sst, (rowNo, cells) => {
+    if (!C) { C = mapColumns(cells); return; }
+    rows++;
+    const idv = get(cells, C.id), refv = str(get(cells, C.ref)).trim();
+    let key = lastKey;
+    if (idv !== undefined && idv !== null && idv !== "") key = "#" + idv;
+    else if (refv) key = "r" + refv;
+    if (!key) return;
+    lastKey = key;
+    let v = verses.get(key);
+    if (!v) {
+      v = { sortKey: typeof idv === "number" ? idv : null, seq: seq++, ref: null, h: [], x: [], n: [], w: [] };
+      verses.set(key, v);
+    }
+    if (refv && !v.ref) v.ref = refv;
+    const hdg = get(cells, C.hdg);
+    if (hdg) { const t = stripTags(hdg); if (t) v.h.push({ t, sub: /subhdg/i.test(str(hdg)) }); }
+    const xr = get(cells, C.xref);
+    if (xr) { const t = stripTags(xr); if (t) v.x.push(t); }
+
+    const o = str(get(cells, C.orig)).trim();
+    const engCore = str(get(cells, C.eng)).trim();
+    const e = stripTags(str(get(cells, C.open)).trim() + engCore + str(get(cells, C.pnc)).trim() +
+                        str(get(cells, C.close)).trim() + str(get(cells, C.endText)).trim());
+    if (!o && !engCore) return;           // row with neither word: nothing to show
+    const w = { o, e: engCore ? e : "", r: rowNo };
+    const om = str(get(cells, C.marked)).trim();
+    if (om && om !== o) w.m = om;
+    const tr = str(get(cells, C.translit)).trim(); if (tr) w.t = tr;
+    const p = str(get(cells, C.parse)).trim(); if (p) w.p = p;
+    const pl = str(get(cells, C.parseLong)).trim(); if (pl && pl !== p) w.P = pl;
+    const sh = get(cells, C.strHeb), sg = get(cells, C.strGrk);
+    if (sh !== undefined && sh !== null && sh !== "") w.s = "H" + sh;
+    else if (sg !== undefined && sg !== null && sg !== "") w.s = "G" + sg;
+    const os = get(cells, C.origSort); if (typeof os === "number") w.k = os;
+    const bs = get(cells, C.bsbSort); if (typeof bs === "number") w.b = bs;
+    const lang = str(get(cells, C.lang)).trim(); if (lang) w.l = lang;
+    const note = get(cells, C.notes);
+    if (note) { const t = cleanNote(note); if (t) { v.n.push(t); w.f = v.n.length; } }
+    v.w.push(w);
+    words++;
+  }, pct => progress("Reading rows…", 0.05 + 0.85 * pct));
+
+  if (!C) throw new Error("The worksheet is empty.");
+  progress("Organising verses…", 0.92);
+
+  const books = new Map();
+  let skipped = 0;
+  const list = [...verses.values()].sort((a, b) =>
+    (a.sortKey ?? Infinity) - (b.sortKey ?? Infinity) || a.seq - b.seq);
+  for (const v of list) {
+    const m = v.ref && REF_RE.exec(v.ref);
+    if (!m) { skipped++; continue; }
+    const name = m[1], c = +m[2], vn = +m[3];
+    let b = books.get(name);
+    if (!b) { b = { name, order: v.sortKey ?? v.seq, verses: [], langs: {} }; books.set(name, b); }
+    if (v.w.some(w => typeof w.b === "number")) v.w.sort((x, y) => (x.b ?? 0) - (y.b ?? 0));
+    for (const w of v.w) { if (w.l) b.langs[w.l] = (b.langs[w.l] || 0) + 1; delete w.l; delete w.b; }
+    const verse = { c, v: vn, w: v.w };
+    if (v.h.length) verse.h = v.h;
+    if (v.x.length) verse.x = v.x;
+    if (v.n.length) verse.n = v.n;
+    b.verses.push(verse);
+  }
+  for (const b of books.values()) {
+    const langs = Object.entries(b.langs).sort((a, z) => z[1] - a[1]).map(x => x[0]);
+    const sample = b.verses.find(v => v.w.some(w => w.o));
+    const hebScript = sample ? /[֐-׿]/.test(sample.w.find(w => w.o).o) : false;
+    b.lang = langs[0] || (hebScript ? "Hebrew" : "Greek");
+    b.rtl = hebScript || /hebrew|aramaic/i.test(b.lang);
+    delete b.langs;
+  }
+  return { books: [...books.values()], rows, words, skipped };
+}
+
+async function saveBooks(file, parsed) {
+  const db = await openDB();
+  const tx = db.transaction(["books", "meta"], "readwrite");
+  const meta = tx.objectStore("meta");
+  const store = tx.objectStore("books");
+  const index = (await idbReq(meta.get("index"))) || { books: [], sources: [] };
+  const names = new Set(parsed.books.map(b => b.name));
+  const sourceId = Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+
+  for (const s of index.sources) s.books = s.books.filter(n => !names.has(n));
+  index.sources = index.sources.filter(s => s.books.length);
+  index.sources.push({
+    id: sourceId, fileName: file.name, size: file.size, lastModified: file.lastModified,
+    loadedAt: Date.now(), books: parsed.books.map(b => b.name), rows: parsed.rows, words: parsed.words,
+  });
+  index.books = index.books.filter(b => !names.has(b.name));
+  for (const b of parsed.books) {
+    const chapters = [];
+    for (const v of b.verses) {
+      let ch = chapters[chapters.length - 1];
+      if (!ch || ch[0] !== v.c) { ch = [v.c, []]; chapters.push(ch); }
+      ch[1].push(v.v);
+    }
+    index.books.push({ name: b.name, order: b.order, canon: canonIndex(b.name), lang: b.lang, rtl: b.rtl, chapters, source: sourceId });
+    store.put(b);
+  }
+  index.books.sort((a, z) => a.canon - z.canon || a.order - z.order);
+  // Books no longer referenced by any source (none today) are left alone.
+  meta.put(index, "index");
+  await new Promise((resolve, reject) => {
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error("Saving was aborted (browser storage may be full)."));
+  });
+  db.close();
+  return { books: parsed.books.map(b => b.name), rows: parsed.rows, words: parsed.words, skipped: parsed.skipped };
+}
+
+if (typeof self !== "undefined" && typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope) {
+  self.onmessage = async ev => {
+    const file = ev.data.file;
+    let last = 0;
+    const progress = (phase, pct) => {
+      const now = Date.now();
+      if (now - last > 80 || pct >= 1) { last = now; self.postMessage({ type: "progress", phase, pct }); }
+    };
+    try {
+      if (typeof DecompressionStream === "undefined") throw new Error("This browser is too old to read .xlsx files here. Please use a current Chrome, Edge, Firefox or Safari.");
+      const parsed = await parseWorkbook(file, progress);
+      if (!parsed.books.length) throw new Error("No verses were found in this workbook.");
+      progress("Saving to this browser…", 0.95);
+      const summary = await saveBooks(file, parsed);
+      self.postMessage({ type: "done", summary });
+    } catch (err) {
+      self.postMessage({ type: "error", message: err && err.message ? err.message : String(err) });
+    }
+  };
+}
+</script>
+
+<!-- ===================================================================
+     Page
+     =================================================================== -->
+<script>
+"use strict";
+(() => {
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const noteHtml = s => esc(s).replace(/&lt;(\/?)(i|b|em)&gt;/gi, "<$1$2>");
+const CONTEXT = 3;
+
+let index = { books: [], sources: [] };
+const bookCache = new Map();          // name -> {data, pos: Map("c:v" -> i)}
+let current = null;                   // {book, c, v}
+const prefs = loadPrefs();
+
+function loadPrefs() {
+  const d = { order: "en", markers: false, details: false, scale: 1 };
+  try { return Object.assign(d, JSON.parse(localStorage.getItem("nbsb-viewer-prefs") || "{}")); } catch { return d; }
+}
+function savePrefs() { try { localStorage.setItem("nbsb-viewer-prefs", JSON.stringify(prefs)); } catch {} }
+function applyPrefs() {
+  $("optOrder").value = prefs.order;
+  $("optMarkers").checked = prefs.markers;
+  $("optDetails").checked = prefs.details;
+  document.body.classList.toggle("details", prefs.details);
+  document.documentElement.style.setProperty("--scale", prefs.scale);
+}
+function setMsg(t) { $("msg").textContent = t || ""; }
+
+// ---------- data access ----------
+async function readIndex() {
+  try {
+    const db = await openDB();
+    const idx = await idbReq(db.transaction("meta").objectStore("meta").get("index"));
+    db.close();
+    index = idx || { books: [], sources: [] };
+  } catch (e) {
+    index = { books: [], sources: [] };
+    setMsg("Browser storage is unavailable (" + e.message + "). Workbooks can't be saved in this window.");
+  }
+}
+async function loadBook(name) {
+  let hit = bookCache.get(name);
+  if (hit) return hit;
+  const db = await openDB();
+  const data = await idbReq(db.transaction("books").objectStore("books").get(name));
+  db.close();
+  if (!data) throw new Error("Book not found: " + name);
+  const pos = new Map();
+  data.verses.forEach((v, i) => pos.set(v.c + ":" + v.v, i));
+  hit = { data, pos };
+  bookCache.set(name, hit);
+  if (bookCache.size > 8) bookCache.delete(bookCache.keys().next().value);
+  return hit;
+}
+const bookMeta = name => index.books.find(b => b.name === name);
+
+// ---------- reference parsing ----------
+const ALIASES = {
+  gn: "genesis", ge: "genesis", ex: "exodus", exo: "exodus", lv: "leviticus", nm: "numbers", nb: "numbers",
+  dt: "deuteronomy", jsh: "joshua", jos: "joshua", jdg: "judges", jdgs: "judges", jg: "judges", rth: "ruth", ru: "ruth",
+  "1sm": "1samuel", "2sm": "2samuel", "1kgs": "1kings", "2kgs": "2kings", "1kg": "1kings", "2kg": "2kings",
+  "1chr": "1chronicles", "2chr": "2chronicles", jb: "job", ps: "psalm", pss: "psalm", psa: "psalm", psalms: "psalm",
+  prv: "proverbs", pr: "proverbs", qoh: "ecclesiastes", ec: "ecclesiastes", sng: "songofsolomon", sos: "songofsolomon",
+  ss: "songofsolomon", song: "songofsolomon", songofsongs: "songofsolomon", canticles: "songofsolomon",
+  is: "isaiah", ezk: "ezekiel", dn: "daniel", hs: "hosea", jl: "joel", jnh: "jonah", mc: "micah", hg: "haggai",
+  ml: "malachi", mt: "matthew", mk: "mark", mrk: "mark", lk: "luke", jn: "john", jhn: "john", rm: "romans",
+  gl: "galatians", php: "philippians", phil: "philippians", phm: "philemon", philem: "philemon",
+  "1tm": "1timothy", "2tm": "2timothy", hb: "hebrews", jas: "james", jm: "james", "1pt": "1peter", "2pt": "2peter",
+  "1jn": "1john", "2jn": "2john", "3jn": "3john", jd: "jude", rv: "revelation", rev: "revelation", revelations: "revelation",
+};
+function isSubseq(needle, hay) {
+  let j = 0;
+  for (let i = 0; i < hay.length && j < needle.length; i++) if (hay[i] === needle[j]) j++;
+  return j === needle.length;
+}
+function resolveBook(raw) {
+  const n = normBook(raw);
+  if (!n) return null;
+  const books = index.books.map(b => ({ b, n: normBook(b.name) }));
+  const same = t => books.find(x => x.n === t || (t === "psalm" && x.n === "psalms") || (t === "psalms" && x.n === "psalm"));
+  let hit = same(n);
+  if (!hit && ALIASES[n]) hit = same(ALIASES[n]);
+  if (!hit) hit = books.find(x => x.n.startsWith(n));
+  if (!hit && n.length >= 2) {
+    const lead = /^\d/.test(n) ? n[0] : "";
+    hit = books.find(x => (!lead || x.n[0] === lead) && x.n[lead.length] === n[lead.length] && isSubseq(n, x.n));
+  }
+  return hit ? hit.b : null;
+}
+function parseRef(q) {
+  q = q.trim().replace(/[–—]/g, "-");
+  const m = /^(?:([1-3])\s*|(i{1,3})\s+)?([a-z][a-z .]*?)\.?\s*(?:(\d+)(?:\s*[:., ]\s*(\d+))?)?\s*$/i.exec(q);
+  if (!m) return null;
+  const prefix = m[1] || (m[2] ? String(m[2].length) : "");
+  let book = resolveBook(prefix + m[3]);
+  if (!book && m[2]) book = resolveBook(m[2] + m[3]);
+  if (!book) return { error: `No book matching “${q}”.` };
+  return { book: book.name, c: m[4] ? +m[4] : null, v: m[5] ? +m[5] : null };
+}
+
+// ---------- navigation ----------
+function hashFor(b, c, v) { return "#" + encodeURIComponent(`${b} ${c}:${v}`).replace(/%20/g, "+").replace(/%3A/gi, ":"); }
+function go(b, c, v) {
+  const h = hashFor(b, c, v);
+  if (location.hash === h) show(b, c, v); else location.hash = h;
+}
+function fromHash() {
+  const raw = decodeURIComponent(location.hash.slice(1).replace(/\+/g, " "));
+  const m = /^(.*\S)\s+(\d+):(\d+)$/.exec(raw);
+  if (!m || !bookMeta(m[1])) return false;
+  show(m[1], +m[2], +m[3]);
+  return true;
+}
+function search(q) {
+  if (!index.books.length) { setMsg("Load a workbook first."); return; }
+  const r = parseRef(q);
+  if (!r) { setMsg(`Couldn't read “${q}” as a reference. Try e.g. “John 3:16”.`); return; }
+  if (r.error) { setMsg(r.error); return; }
+  const meta = bookMeta(r.book);
+  const ch = r.c == null ? meta.chapters[0] : meta.chapters.find(x => x[0] === r.c);
+  if (!ch) { setMsg(`${r.book} has chapters ${meta.chapters[0][0]}–${meta.chapters[meta.chapters.length - 1][0]}.`); return; }
+  const v = r.v == null ? ch[1][0] : r.v;
+  if (!ch[1].includes(v)) { setMsg(`${r.book} ${ch[0]} has verses ${ch[1][0]}–${ch[1][ch[1].length - 1]}.`); return; }
+  setMsg("");
+  go(r.book, ch[0], v);
+}
+async function step(dir) {
+  if (!current) return;
+  const { data, pos } = await loadBook(current.book);
+  const i = pos.get(current.c + ":" + current.v) + dir;
+  if (i >= 0 && i < data.verses.length) { const v = data.verses[i]; go(current.book, v.c, v.v); return; }
+  const bi = index.books.findIndex(b => b.name === current.book) + dir;
+  const nb = index.books[bi];
+  if (!nb) return;
+  const ch = dir > 0 ? nb.chapters[0] : nb.chapters[nb.chapters.length - 1];
+  go(nb.name, ch[0], dir > 0 ? ch[1][0] : ch[1][ch[1].length - 1]);
+}
+
+// ---------- rendering ----------
+function wordHtml(w, rtl) {
+  const o = prefs.markers && w.m ? w.m : w.o;
+  const tip = [w.t, w.P || w.p, w.s && "Strong's " + w.s, "Excel row " + w.r].filter(Boolean).join("  ·  ");
+  const cls = "w" + (o ? "" : " gap-o") + (w.e ? "" : " gap-e");
+  const fn = w.f ? `<sup>${String.fromCharCode(96 + w.f)}</sup>` : "";
+  const d = [w.t, w.p, w.s].filter(Boolean).map(x => `<span class="d">${esc(x)}</span>`).join("");
+  return `<span class="${cls}" title="${esc(tip)}"><span class="o${rtl ? " he" : ""}"${rtl ? ' dir="rtl" lang="he"' : ' lang="grc"'}>${esc(o)}</span>` +
+         `<span class="e">${esc(w.e)}${fn}</span>${d}</span>`;
+}
+function verseHtml(book, meta, v, isTarget) {
+  let words = v.w;
+  const origOrder = prefs.order === "orig";
+  if (origOrder && words.some(w => typeof w.k === "number")) words = [...words].sort((a, b) => (a.k ?? 1e12) - (b.k ?? 1e12));
+  const rtl = meta.rtl;
+  let h = `<section class="verse${isTarget ? " target" : ""}" id="v-${v.c}-${v.v}"${isTarget ? ' aria-current="true"' : ""}>`;
+  for (const hd of v.h || []) h += `<div class="hdg${hd.sub ? " sub" : ""}">${esc(hd.t)}</div>`;
+  for (const x of v.x || []) h += `<div class="xref">${esc(x)}</div>`;
+  h += `<a class="vref" href="${hashFor(book, v.c, v.v)}">${esc(book)} ${v.c}:${v.v}</a>`;
+  if (words.length) h += `<div class="il${rtl && origOrder ? " rtl" : ""}">${words.map(w => wordHtml(w, rtl)).join("")}</div>`;
+  else h += `<div class="empty-verse">No words in the workbook for this verse.</div>`;
+  if (v.n && v.n.length) h += `<ol class="fn">${v.n.map(n => `<li>${noteHtml(n)}</li>`).join("")}</ol>`;
+  return h + "</section>";
+}
+let renderToken = 0;
+async function show(book, c, v) {
+  const token = ++renderToken;
+  const meta = bookMeta(book);
+  if (!meta) { setMsg(`“${book}” isn't in the loaded workbooks.`); return; }
+  let hit;
+  try { hit = await loadBook(book); } catch (e) { setMsg(e.message); return; }
+  if (token !== renderToken) return;
+  const i = hit.pos.get(c + ":" + v);
+  if (i === undefined) { setMsg(`${book} ${c}:${v} isn't in the workbook.`); return; }
+  setMsg("");
+  current = { book, c, v };
+  const vs = hit.data.verses;
+  const from = Math.max(0, i - CONTEXT), to = Math.min(vs.length - 1, i + CONTEXT);
+  let html = "";
+  for (let k = from; k <= to; k++) html += verseHtml(book, meta, vs[k], k === i);
+  $("view").innerHTML = html;
+  document.title = `${book} ${c}:${v} · NBSB Interlinear`;
+  $("q").value = `${book} ${c}:${v}`;
+  syncSelects();
+  const el = $("view").querySelector(".target");
+  if (el && (el.getBoundingClientRect().top < 0 || el.getBoundingClientRect().bottom > innerHeight)) {
+    el.scrollIntoView({ block: "center" });
+  } else if (!el || i - from > 0) {
+    // keep the reading position stable at the top of the passage
+    if (scrollY > 0 && el && el.getBoundingClientRect().top > 120) scrollTo({ top: 0 });
+  }
+}
+
+// ---------- chrome ----------
+function fillSelect(sel, items, value) {
+  sel.innerHTML = items.map(([val, label]) => `<option value="${esc(val)}">${esc(label)}</option>`).join("");
+  if (value != null) sel.value = String(value);
+}
+function syncSelects() {
+  const has = index.books.length > 0;
+  for (const id of ["selBook", "selCh", "selV", "prev", "next"]) $(id).disabled = !has;
+  if (!has) { for (const id of ["selBook", "selCh", "selV"]) $(id).innerHTML = ""; return; }
+  const cur = current && bookMeta(current.book) ? current : null;
+  const meta = cur ? bookMeta(cur.book) : index.books[0];
+  fillSelect($("selBook"), index.books.map(b => [b.name, b.name]), meta.name);
+  fillSelect($("selCh"), meta.chapters.map(ch => [ch[0], "Ch " + ch[0]]), cur ? cur.c : meta.chapters[0][0]);
+  const ch = meta.chapters.find(x => x[0] === +$("selCh").value) || meta.chapters[0];
+  fillSelect($("selV"), ch[1].map(v => [v, "v " + v]), cur ? cur.v : ch[1][0]);
+}
+function renderStatus() {
+  const f = $("status");
+  const fmtDate = t => new Date(t).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  const src = index.sources.map(s => {
+    const n = s.books.length;
+    const span = n > 2 ? `${s.books[0]} – ${s.books[n - 1]} (${n} books)` : s.books.join(", ");
+    return `<li><b>${esc(s.fileName)}</b> — ${esc(span)}; file saved ${esc(fmtDate(s.lastModified))}, loaded ${esc(fmtDate(s.loadedAt))}</li>`;
+  }).join("");
+  f.innerHTML = `<div class="row"><span>${index.sources.length ? "Loaded workbooks:" : "No workbooks loaded."}</span>
+    <button id="loadBtn2">Load / replace workbook…</button>
+    ${index.sources.length ? '<button id="clearBtn">Remove all</button>' : ""}
+    <span>Tip: <kbd>←</kbd> <kbd>→</kbd> step through verses, <kbd>/</kbd> jumps to search. Hover a word for parsing and its Excel row.</span></div>
+    ${src ? `<ul>${src}</ul>` : ""}`;
+  $("loadBtn2").onclick = () => $("file").click();
+  if ($("clearBtn")) $("clearBtn").onclick = clearAll;
+}
+function renderWelcome() {
+  $("view").innerHTML = `<div class="welcome">
+    <h1>Load the NBSB workbooks</h1>
+    <p>Choose <b>Nbsb_Old_Testament.xlsx</b> and/or <b>Nbsb_New_Testament.xlsx</b> (or drag them onto this page).</p>
+    <p>They are read here in your browser and kept for next time, so this is only needed once, and again when a newer version of a workbook arrives. Nothing is uploaded.</p>
+    <button class="primary" id="loadBtn">Choose workbook(s)…</button></div>`;
+  $("loadBtn").onclick = () => $("file").click();
+}
+async function refresh() {
+  await readIndex();
+  $("bookList").innerHTML = index.books.map(b => `<option value="${esc(b.name)} "></option>`).join("");
+  renderStatus();
+  syncSelects();
+  if (!index.books.length) { current = null; renderWelcome(); return; }
+  if (current && bookMeta(current.book)) show(current.book, current.c, current.v);
+  else if (!fromHash()) { const b = index.books[0]; go(b.name, b.chapters[0][0], b.chapters[0][1][0]); }
+}
+async function clearAll() {
+  if (!confirm("Remove all loaded workbooks from this browser?")) return;
+  const db = await openDB();
+  const tx = db.transaction(["books", "meta"], "readwrite");
+  tx.objectStore("books").clear();
+  tx.objectStore("meta").clear();
+  await new Promise(r => { tx.oncomplete = r; tx.onerror = r; });
+  db.close();
+  bookCache.clear();
+  current = null;
+  history.replaceState(null, "", location.pathname + location.search);
+  refresh();
+}
+
+// ---------- loading workbooks ----------
+let workerUrl = null;
+function makeWorker() {
+  if (!workerUrl) {
+    const src = $("common-src").textContent + "\n" + $("worker-src").textContent;
+    workerUrl = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
+  }
+  return new Worker(workerUrl);
+}
+function loadOne(file) {
+  return new Promise(resolve => {
+    $("ldFile").textContent = file.name;
+    $("ldPhase").textContent = "Starting…";
+    $("ldBar").style.width = "0";
+    const w = makeWorker();
+    w.onmessage = ev => {
+      const m = ev.data;
+      if (m.type === "progress") {
+        $("ldPhase").textContent = m.phase + " " + Math.round(m.pct * 100) + "%";
+        $("ldBar").style.width = (m.pct * 100).toFixed(1) + "%";
+      } else { w.terminate(); resolve(m); }
+    };
+    w.onerror = e => { w.terminate(); resolve({ type: "error", message: e.message || "The workbook reader crashed." }); };
+    w.postMessage({ file });
+  });
+}
+async function loadFiles(files) {
+  files = [...files].filter(f => /\.xlsx$/i.test(f.name));
+  if (!files.length) { setMsg("Please choose .xlsx workbook files."); return; }
+  $("loading").classList.add("on");
+  const errors = [], done = [];
+  for (const f of files) {
+    const r = await loadOne(f);
+    if (r.type === "error") errors.push(`${f.name}: ${r.message}`);
+    else { done.push(r.summary); r.summary.books.forEach(b => bookCache.delete(b)); }
+  }
+  $("loading").classList.remove("on");
+  await refresh();
+  setMsg(errors.join("\n"));
+  if (!errors.length && done.length) {
+    const n = done.reduce((a, s) => a + s.books.length, 0);
+    const el = document.createElement("span");
+    el.style.color = "var(--muted)";
+    el.textContent = `Loaded ${n} book${n === 1 ? "" : "s"}.`;
+    $("msg").replaceChildren(el);
+    setTimeout(() => { if ($("msg").firstChild === el) setMsg(""); }, 4000);
+  }
+}
+
+// ---------- events ----------
+$("searchForm").onsubmit = e => { e.preventDefault(); $("q").blur(); search($("q").value); };
+$("prev").onclick = () => step(-1);
+$("next").onclick = () => step(1);
+$("selBook").onchange = () => { const b = bookMeta($("selBook").value); go(b.name, b.chapters[0][0], b.chapters[0][1][0]); };
+$("selCh").onchange = () => { const b = bookMeta($("selBook").value); const ch = b.chapters.find(x => x[0] === +$("selCh").value); go(b.name, ch[0], ch[1][0]); };
+$("selV").onchange = () => go($("selBook").value, +$("selCh").value, +$("selV").value);
+$("optOrder").onchange = () => { prefs.order = $("optOrder").value; savePrefs(); if (current) show(current.book, current.c, current.v); };
+$("optMarkers").onchange = () => { prefs.markers = $("optMarkers").checked; savePrefs(); if (current) show(current.book, current.c, current.v); };
+$("optDetails").onchange = () => { prefs.details = $("optDetails").checked; savePrefs(); applyPrefs(); };
+$("smaller").onclick = () => { prefs.scale = Math.max(0.7, +(prefs.scale - 0.1).toFixed(2)); savePrefs(); applyPrefs(); };
+$("larger").onclick = () => { prefs.scale = Math.min(2, +(prefs.scale + 0.1).toFixed(2)); savePrefs(); applyPrefs(); };
+$("file").onchange = () => { const f = $("file").files; if (f.length) loadFiles(f); $("file").value = ""; };
+addEventListener("hashchange", fromHash);
+addEventListener("keydown", e => {
+  const t = e.target;
+  const typing = t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement;
+  if (e.key === "/" && !typing) { e.preventDefault(); $("q").focus(); $("q").select(); }
+  else if (!typing && !e.altKey && !e.ctrlKey && !e.metaKey && e.key === "ArrowLeft") step(-1);
+  else if (!typing && !e.altKey && !e.ctrlKey && !e.metaKey && e.key === "ArrowRight") step(1);
+});
+let dragDepth = 0;
+addEventListener("dragenter", e => { if (e.dataTransfer && [...e.dataTransfer.types].includes("Files")) { dragDepth++; $("drop").classList.add("on"); } });
+addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("drop").classList.remove("on"); } });
+addEventListener("dragover", e => e.preventDefault());
+addEventListener("drop", e => { e.preventDefault(); dragDepth = 0; $("drop").classList.remove("on"); if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files); });
+
+applyPrefs();
+refresh();
+})();
+</script>
+</body>
+</html>

@@ -81,6 +81,29 @@ A single self‑contained page: word/phrase search, interlinear, cross‑referen
 cross‑language alignment, frequency & distribution charts, and an interactive
 co‑occurrence network — all rendered from the same JSON API.
 
+### NBSB interlinear workbook viewer
+
+A reviewer's view of the NBSB interlinear workbooks (`Nbsb_Old_Testament.xlsx`,
+`Nbsb_New_Testament.xlsx`). Open
+[`src/scripturebigdata/web/interlinear.html`](src/scripturebigdata/web/interlinear.html)
+directly in a browser, or visit `/interlinear` on the web app (`sbd serve`).
+
+- **Load** one or both workbooks (button or drag & drop). They are read inside
+  the browser (nothing is uploaded) and saved there, so later visits open instantly.
+- **Search** any reference: `Gen 1:1`, `jn 3:16`, `1 Cor 13:4`, `Ps 23`.
+  The verse is shown interlinear — the Hebrew/Aramaic/Greek word directly above
+  its NBSB English — in **bold**, with the three verses before and after it (within
+  the same book). If either the original or the English cell is blank, its slot
+  is kept empty and the other is still shown.
+- **Replace** a workbook by loading the newer file: every book it contains is
+  replaced; the footer lists which file (and file date) each book came from.
+- Extras: section headings, cross-references and footnotes; `←`/`→` to step
+  through verses; hover a word for transliteration, parsing, Strong's number and
+  its **Excel row**; optional original-language word order and edition markers.
+
+Columns are found by their header names (`Verse`, `WLC / Nestle Base …`,
+`NBSB version`, `pnc`, `footnotes`, …), so added or reordered columns are fine.
+
 ### Python library
 
 ```python

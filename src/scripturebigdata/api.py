@@ -79,6 +79,12 @@ def index() -> str:
     return "<h1>ScriptureBigData</h1><p>Frontend not found.</p>"
 
 
+@app.get("/interlinear", response_class=HTMLResponse)
+def interlinear_viewer() -> str:
+    """NBSB interlinear workbook viewer (reads the .xlsx files in the browser)."""
+    return (_WEB_DIR / "interlinear.html").read_text(encoding="utf-8")
+
+
 # --------------------------------------------------------------------------- #
 # API                                                                         #
 # --------------------------------------------------------------------------- #
